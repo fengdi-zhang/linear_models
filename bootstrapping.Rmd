@@ -1,0 +1,171 @@
+---
+title: "linear models"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(p8105.datasets)
+library(rvest)
+
+knitr::opts_chunk$set(
+	echo = TRUE,
+	warning = FALSE,
+  fig.width = 6,
+  fig.asp = .6,
+  out.width = "90%"
+)
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+```
+
+
+```{r}
+data("nyc_airbnb")
+
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(stars = review_scores_location / 2) %>% 
+  rename(
+    borough = neighbourhood_group,
+    neighborhood = neighbourhood) %>% 
+  filter(borough != "Staten Island") %>% 
+  select(price, stars, borough, neighborhood, room_type)
+```
+
+
+## Fit the first model
+
+```{r}
+fit = lm(price ~ stars + borough, data = nyc_airbnb) #linear model, outcome = price, predictors = stars, borough
+#reference = Bronx
+
+fit
+```
+
+```{r}
+summary(fit)$coef
+```
+
+```{r}
+fit %>%
+  broom::tidy() %>%
+  mutate(
+    term = str_replace(term, "borough", "Borough: ")
+  ) %>%
+  select(term, estimate, p.value) %>%
+  knitr::kable(digits = 2)
+```
+
+Let's change reference category
+
+```{r}
+fit = 
+  nyc_airbnb %>%
+  mutate(
+    borough = fct_infreq(borough) #make reference the most frequent borough
+  ) %>%
+  lm(price ~ stars + borough, data = .)
+```
+
+```{r}
+fit %>%
+  broom::tidy() %>%
+  mutate(
+    term = str_replace(term, "borough", "Borough: ")
+  ) %>%
+  select(term, estimate, p.value) %>%
+  knitr::kable(digits = 2)
+```
+
+
+```{r}
+fit %>%
+  broom::glance() %>%
+  select(AIC)
+```
+
+
+## Diagnositics
+
+```{r}
+modelr::add_residuals(nyc_airbnb, fit) %>%
+  ggplot(aes(x = stars, y = resid)) +
+  geom_point()
+
+#high var for stars 3-5, against constant variance assumption
+```
+
+```{r}
+nyc_airbnb %>%
+  modelr::add_residuals(fit) %>%
+  ggplot(aes(x = borough, y = resid)) +
+  geom_violin() +
+  ylim(-250, 250)
+```
+
+## Hypothesis testing
+
+one coef.
+
+```{r}
+fit %>%
+  broom::tidy()
+```
+
+```{r}
+fit_null = lm(price ~ stars, data = nyc_airbnb)
+fit_alt = lm(price ~ stars + borough, data = nyc_airbnb)
+
+anova(fit_null, fit_alt) %>%
+  broom::tidy()
+
+#small p values -> should put borough in model
+```
+
+
+## Room type by borough
+
+Interactions ...?
+
+```{r}
+fit = 
+  nyc_airbnb %>%
+  lm(price ~ stars + borough * room_type, data = .)
+#get all combinations of borough and room type
+
+fit %>%
+  broom::tidy()
+```
+
+
+So can we fit models by borough?
+
+```{r}
+nyc_airbnb %>%
+  nest(df = -borough) %>%
+  mutate(
+    models = map(.x = df, ~lm(price ~ stars + room_type, data = .x)), #map lm over df column(nested tibbles)
+    results = map(models, broom::tidy)
+  ) %>%
+  select(borough, results) %>%
+  unnest(results)
+```
+
+Quick double check
+
+```{r}
+nyc_airbnb %>%
+  filter(borough == "Bronx") %>%
+  lm(price ~ stars + room_type, data = .) %>%
+  broom::tidy()
+```
+
